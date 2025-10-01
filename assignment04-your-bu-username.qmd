@@ -22,3 +22,178 @@ execute:
   eval: false
   freeze: auto
 ---
+
+```{python}
+from pyspark.sql import SparkSession
+import pandas as pd
+import plotly.express as px
+import plotly.io as pio
+import numpy as np
+
+# Set seed for reproducibility
+np.random.seed(42)
+
+# Set Plotly rendering to notebook
+pio.renderers.default = "notebook"
+
+# Initialize Spark Session
+spark = SparkSession.builder.appName("LightcastData").getOrCreate()
+
+# Load Data
+df = spark.read.option("header", "true") \
+               .option("inferSchema", "true") \
+               .option("multiLine", "true") \
+               .option("escape", "\"") \
+               .csv("./data/lightcast_job_postings.csv")
+
+# Show Schema and Sample Data
+print("---This is Diagnostic check, No need to print it in the final doc---")
+
+# df.printSchema()  # comment this line when rendering the submission
+df.show(5)
+```
+
+```{python}
+# For REMOTE_TYPE_NAME replace Remote with Remote, [None] with undefined, Not Remote with On Premise, Hybrid Remote with Hybrid, and Null with On Premise 
+
+from pyspark.sql.functions import col, when
+
+df_eda = df_eda.withColumn(
+    "REMOTE_TYPE_NAME",
+    when(col("REMOTE_TYPE_NAME") == "Remote", "Remote")
+    .when(col("REMOTE_TYPE_NAME") == "[None]", "Undefined")
+    .when(col("REMOTE_TYPE_NAME") == "Not Remote", "On Premise")
+    .when(col("REMOTE_TYPE_NAME") == "Hybrid Remote", "Hybrid")
+    .when(col("REMOTE_TYPE_NAME").isNull(), "On Premise")
+    .otherwise(col("REMOTE_TYPE_NAME"))
+)
+
+# create a temporary SQL view if using Spark SQL queries later
+df_eda.createOrReplaceTempView("df_eda")
+
+# Define categorical column(s) to inspect
+categorical_cols = [
+    "REMOTE_TYPE_NAME"
+]
+
+# Display distinct values for each categorical column
+for colname in categorical_cols:
+    print(f"\n---- {colname} ----")
+    df_eda.select(colname).distinct().show(50, truncate=False)
+
+```
+
+```{python}
+from pyspark.sql.functions import countDistinct
+
+# Count number of unique values per column
+df_eda.select([
+    countDistinct(c).alias(c + "_nunique")
+    for c in df_eda.columns
+]).show(truncate=False)
+
+categorical_cols = [
+    "STATE_NAME", "REMOTE_TYPE_NAME", "EMPLOYMENT_TYPE_NAME",
+    "MIN_EDULEVELS_NAME", "MAX_EDULEVELS_NAME",
+    "COMPANY_IS_STAFFING", "IS_INTERNSHIP"
+]
+
+for colname in categorical_cols:
+    print(f"\n---- {colname} ----")
+    df_eda.select(colname).distinct().show(50, truncate=False)
+```
+
+```{python}
+from pyspark.sql.functions import col, pow
+from pyspark.ml.feature import StringIndexer, OneHotEncoder, VectorAssembler
+from pyspark.ml import Pipeline
+
+# Define columns to use for EDA
+eda_cols = [
+    "SALARY",
+    "MIN_YEARS_EXPERIENCE", "MAX_YEARS_EXPERIENCE", "DURATION",
+    "COMPANY_IS_STAFFING", "IS_INTERNSHIP",
+    "STATE_NAME", "REMOTE_TYPE_NAME", "EMPLOYMENT_TYPE_NAME",
+    "MIN_EDULEVELS_NAME", "MAX_EDULEVELS_NAME"
+]
+
+# Show first 5 rows (ensure df_eda is defined before this)
+df_eda.show(5, truncate=False)
+```
+
+```{python}
+from pyspark.sql.functions import col, when
+
+# Calculate median of the DURATION column
+median_duration = df_eda.approxQuantile("DURATION", [0.5], 0.01)[0]
+
+# Fill missing DURATION values with the median (assume 30 if needed)
+df_eda = df_eda.withColumn(
+    "DURATION",
+    when(col("DURATION").isNull(), median_duration).otherwise(col("DURATION"))
+)
+```
+
+
+```{python}
+import hvplot.pandas  # needed to enable hvplot on Pandas DataFrames
+from pyspark.sql.functions import col, when, trim, length, sum as spark_sum
+
+# Calculate missing value counts for each column in df_eda
+missing_df = df_eda.select([
+    spark_sum(
+        when(col(c).isNull() | (length(trim(col(c))) == 0), 1).otherwise(0)
+    ).alias(c)
+    for c in df_eda.columns
+])
+
+# Convert to pandas for visualization
+missing_pd = missing_df.toPandas().T.reset_index()
+missing_pd.columns = ["column", "missing_count"]
+
+# Get total number of rows in original df
+total_rows = df_eda.count()
+
+# Calculate missing percentage
+missing_pd["missing_pct"] = 100 * missing_pd["missing_count"] / total_rows
+
+# Plot missing values using hvplot
+missing_pd.sort_values("missing_pct", ascending=False).hvplot.bar(
+    x="column", y="missing_pct", rot=90,
+    title="Percentage of Missing Values by Column",
+    height=600, width=900,
+    ylabel="Missing Percentage (%)", xlabel="Features"
+).opts(xrotation=45)
+
+```
+
+```{python}
+import pandas as pd
+import hvplot.pandas  # make sure this is imported for hvplot support
+
+# Sample a small fraction of the data and convert to Pandas
+df_sample = df_eda.sample(fraction=0.01, seed=42).toPandas()
+
+# Create a boolean mask of missing values
+missing_mask = df_sample.isnull()
+
+# Melt the mask into long-form format
+missing_long = (
+    missing_mask.reset_index()
+    .melt(id_vars="index", var_name="column", value_name="is_missing")
+)
+
+# Convert boolean to int (True → 1, False → 0)
+missing_long["is_missing"] = missing_long["is_missing"].astype(int)
+
+# Plot heatmap
+missing_long.hvplot.heatmap(
+    x="column", y="index", c="is_missing",
+    cmap="Reds", colorbar=False,
+    width=900, height=500,
+    title="Heatmap of Missing Values (Sample)"
+).opts(xrotation=45)
+
+
+```
+

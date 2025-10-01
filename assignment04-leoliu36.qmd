@@ -1,55 +1,60 @@
 ---
-title: Assignment 04
+title: "Assignment 04"
+subtitle: "GitHub Repository: https://github.com/met-ad-688/assignment-04-leoliu36.git"
 author:
-  - name: Norah Jones
+  - name: Leo Liu
     affiliations:
       - id: bu
         name: Boston University
         city: Boston
         state: MA
 number-sections: true
-date: '2024-11-21'
+date: "2025-09-30"
 date-modified: today
 date-format: long
 format:
-  html:
-    theme: cerulean
+  docx:
     toc: true
-    toc-depth: 2
-
+    number-sections: true
 execute:
   echo: false
-  eval: false
+  eval: true
   freeze: auto
+  kernel: ad688-venv
 ---
 
 ```{python}
-from pyspark.sql import SparkSession
+import sys
+print(sys.executable)
+```
+
+```{python}
+# Data Loading & Setup
 import pandas as pd
 import plotly.express as px
 import plotly.io as pio
+from pyspark.sql import SparkSession
+import re
 import numpy as np
+import plotly.graph_objects as go
+from pyspark.sql.functions import col, split, explode, regexp_replace, transform, when, trim
+from pyspark.sql import functions as F
+from pyspark.sql.functions import col, monotonically_increasing_id
 
-# Set seed for reproducibility
 np.random.seed(42)
 
-# Set Plotly rendering to notebook
 pio.renderers.default = "notebook"
 
 # Initialize Spark Session
 spark = SparkSession.builder.appName("LightcastData").getOrCreate()
 
 # Load Data
-df = spark.read.option("header", "true") \
-               .option("inferSchema", "true") \
-               .option("multiLine", "true") \
-               .option("escape", "\"") \
-               .csv("./data/lightcast_job_postings.csv")
+df = spark.read.option("header", "true").option("inferSchema", "true").option("multiLine", "true").option("quote", "\"").option("escape", "\"").csv("../data/lightcast_job_postings.csv")
+df.createOrReplaceTempView("job_postings")
 
 # Show Schema and Sample Data
-print("---This is Diagnostic check, No need to print it in the final doc---")
-
-# df.printSchema()  # comment this line when rendering the submission
+#print("---This is Diagnostic check, No need to print it in the final doc---")
+#df.printSchema() # comment this line when rendering the submission
 df.show(5)
 ```
 
